@@ -1,0 +1,198 @@
+---
+# JWT Secret for Geth<->Beacon communication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jwt-secret
+stringData:
+  jwt.hex: $(openssl rand -hex 32)  # Will be generated during apply
+---
+# Geth Execution Client
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geth-node
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: geth
+  template:
+    metadata:
+      labels:
+        app: geth
+    spec:
+      containers:
+      - name: geth
+        image: ethereum/client-go:stable
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Starting Geth Execution Client";
+            geth --datadir=/data \
+                 --http \
+                 --http.addr=0.0.0.0 \
+                 --http.port=8545 \
+                 --http.api=eth,net,web3,engine \
+                 --authrpc.jwtsecret=/jwt/jwt.hex \
+                 --authrpc.port=8551 \
+                 --authrpc.addr=0.0.0.0 \
+                 --syncmode=snap \
+                 --metrics \
+                 --metrics.addr=0.0.0.0 || sleep 300
+        volumeMounts:
+        - name: geth-data
+          mountPath: /data
+        - name: jwt-secret
+          mountPath: /jwt
+          readOnly: true
+        ports:
+        - containerPort: 8545
+          name: http
+        - containerPort: 8551
+          name: authrpc
+        - containerPort: 30303
+          name: p2p
+      volumes:
+      - name: geth-data
+        persistentVolumeClaim:
+          claimName: geth-pvc
+      - name: jwt-secret
+        secret:
+          secretName: jwt-secret
+---
+# Prysm Beacon Chain Client
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prysm-beacon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prysm-beacon
+  template:
+    metadata:
+      labels:
+        app: prysm-beacon
+    spec:
+      containers:
+      - name: beacon-node
+        image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Starting Prysm Beacon Chain";
+            beacon-chain \
+              --datadir=/data \
+              --execution-endpoint=http://geth-node:8551 \
+              --jwt-secret=/jwt/jwt.hex \
+              --rpc-host=0.0.0.0 \
+              --grpc-gateway-host=0.0.0.0 \
+              --monitoring-host=0.0.0.0 \
+              --accept-terms-of-use || sleep 300
+        volumeMounts:
+        - name: prysm-data
+          mountPath: /data
+        - name: jwt-secret
+          mountPath: /jwt
+          readOnly: true
+        ports:
+        - containerPort: 4000
+          name: p2p-tcp
+        - containerPort: 13000
+          name: p2p-udp
+        - containerPort: 3500
+          name: http
+      volumes:
+      - name: prysm-data
+        persistentVolumeClaim:
+          claimName: prysm-pvc
+      - name: jwt-secret
+        secret:
+          secretName: jwt-secret
+---
+# Persistent Volumes
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: geth-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/geth-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: geth-pvc
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Ti
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prysm-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/prysm-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prysm-pvc
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: geth-node
+spec:
+  selector:
+    app: geth
+  ports:
+    - name: http
+      port: 8545
+    - name: authrpc
+      port: 8551
+    - name: p2p
+      port: 30303
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prysm-beacon
+spec:
+  selector:
+    app: prysm-beacon
+  ports:
+    - name: http
+      port: 3500
+    - name: p2p-tcp
+      port: 4000
+    - name: p2p-udp
+      port: 13000
+      protocol: UDP
