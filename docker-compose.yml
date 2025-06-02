@@ -1,0 +1,65 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  geth:
+    image: ethereum/client-go:stable
+    volumes:
+      - geth-data:/data
+      - ./jwt.hex:/geth/jwt.hex:ro
+    tmpfs:
+      - /tmp
+    ports:
+      - "8545:8545"
+      - "8551:8551"
+      - "30303:30303"
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    command:
+      - --datadir=/data
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,engine
+      - --authrpc.jwtsecret=/geth/jwt.hex
+      - --authrpc.port=8551
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.vhosts=*
+      - --syncmode=snap
+      - --cache=4096
+      - --metrics
+      - --metrics.addr=0.0.0.0
+
+  prysm:
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+    volumes:
+      - prysm-data:/data
+      - ./jwt.hex:/geth/jwt.hex:ro
+    tmpfs:
+      - /tmp
+    ports:
+      - "3500:3500"
+      - "4000:4000"
+      - "13000:13000/udp"
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    command:
+      - --datadir=/data
+      - --execution-endpoint=http://geth:8551
+      - --jwt-secret=/geth/jwt.hex
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0
+      - --monitoring-host=0.0.0.0
+      - --accept-terms-of-use
+    depends_on:
+      - geth
+
+volumes:
+  geth-data:
+    driver: local
+  prysm-data:
+    driver: local
