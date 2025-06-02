@@ -3,7 +3,7 @@ name: Deploy Ethereum Stack
 on:
   workflow_dispatch:  # Manual trigger
   push:
-    branches: [main]
+    branches: [main,dev]
     paths:
       - 'deploy.sh'   # Only run when deployment logic changes
 
