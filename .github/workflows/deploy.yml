@@ -1,0 +1,35 @@
+# .github/workflows/deploy.yml
+name: Deploy Ethereum Node
+
+on:
+  push:
+    branches: [main, test]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Docker Compose
+        run: sudo apt-get update && sudo apt-get install -y docker-compose
+
+      - name: Generate JWT secret
+        run: sh scripts/generate-jwt.sh
+
+      - name: Launch Geth + Prysm
+        run: docker-compose up -d
+
+      - name: Check Prysm health
+        run: |
+          for i in {1..10}; do
+            if curl -sf http://localhost:3500/eth/v1/node/health; then
+              echo "Prysm is healthy"
+              break
+            else
+              echo "Waiting for Prysm to become healthy... ($i/10)"
+              sleep 10
+            fi
+          done
