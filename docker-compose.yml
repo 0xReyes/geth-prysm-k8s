@@ -6,7 +6,10 @@ services:
     image: ethereum/client-go:stable
     volumes:
       - geth-data:/data
-      - ./jwt.hex:/geth/jwt.hex:ro
+      - type: bind
+        source: ./jwt.hex
+        target: /geth/jwt.hex
+        read_only: true
     tmpfs:
       - /tmp
     ports:
@@ -36,7 +39,10 @@ services:
     image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
     volumes:
       - prysm-data:/data
-      - ./jwt.hex:/geth/jwt.hex:ro
+      - type: bind
+        source: ./jwt.hex
+        target: /geth/jwt.hex
+        read_only: true
     tmpfs:
       - /tmp
     ports:
