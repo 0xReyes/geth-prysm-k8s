@@ -1,10 +1,15 @@
-
+#
+# A corrected and secure docker-compose.yml for a PUBLIC Geth/Prysm Ethereum Mainnet Node
+#
+# !!! --- SECURITY WARNING --- !!!
+# This configuration exposes your node's APIs to the public internet.
+# YOU ARE RESPONSIBLE for securing the host machine with a firewall.
+#
 # To use this file:
-# 1. Create a directory for your node (e.g., /home/user/eth-node).
-# 2. Inside that directory, run 'openssl rand -hex 32 > jwt.hex' to generate the JWT secret.
-# 3. Replace '0xYOUR_FEE_RECIPIENT_ADDRESS' with your actual Ethereum address.
-# 4. Find a current checkpoint sync URL from a trusted community source (e.g., ethstaker.cc).
-# 5. Run 'docker-compose up -d' from the same directory as this file.
+# 1. Ensure you have a 'jwt.hex' file in this directory.
+# 2. **CRITICAL: Replace '0xYOUR_FEE_RECIPIENT_ADDRESS' with your actual Ethereum address.**
+# 3. Stop your existing containers: `docker-compose down`
+# 4. Use this new file and restart: `docker-compose up -d`
 #
 version: "3.9"
 
@@ -21,12 +26,10 @@ services:
     image: ethereum/client-go:stable
     restart: unless-stopped
     ports:
-      # P2P port for execution layer peering. MUST be exposed.
+      # P2P port for execution layer peering.
       - "30303:30303/tcp"
       - "30303:30303/udp"
-      # --- PUBLIC RPC PORTS ---
-      # Exposing these makes your node a public RPC endpoint.
-      # WARNING: Secure your host machine with a firewall.
+      # Public RPC ports (secure your host with a firewall).
       - "8545:8545/tcp"  # Public HTTP JSON-RPC
       - "8546:8546/tcp"  # Public WebSocket JSON-RPC
     volumes:
@@ -37,20 +40,21 @@ services:
       # --- Engine API Settings (CRITICAL for CL communication, NOT public) ---
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
-      - --authrpc.vhosts="*"
+      # --- FIX: Explicitly allow the 'geth' and 'localhost' hostnames ---
+      - --authrpc.vhosts=geth,localhost
       - --authrpc.jwtsecret=/etc/ethereum/jwt.hex
       # --- Public HTTP RPC Settings ---
       - --http
-      - --http.addr=0.0.0.0          # Listen on all interfaces for public access
+      - --http.addr=0.0.0.0
       - --http.port=8545
-      - --http.vhosts="*"            # Allow all hostnames for public access
-      - --http.api=eth,net,web3      # SAFE, READ-ONLY APIs. DO NOT add 'personal', 'admin', 'txpool'.
+      - --http.vhosts="*"
+      - --http.api=eth,net,web3
       # --- Public WebSocket RPC Settings ---
       - --ws
-      - --ws.addr=0.0.0.0            # Listen on all interfaces for public access
+      - --ws.addr=0.0.0.0
       - --ws.port=8546
-      - --ws.origins="*"             # Allow all origins for public access
-      - --ws.api=eth,net,web3        # SAFE, READ-ONLY APIs.
+      - --ws.origins="*"
+      - --ws.api=eth,net,web3
       # --- Other Recommended Settings ---
       - --datadir=/data
       - --cache=4096
@@ -67,35 +71,32 @@ services:
     depends_on:
       - geth
     ports:
-      # P2P ports for consensus layer peering. MUST be exposed.
+      # P2P ports for consensus layer peering.
       - "13000:13000/tcp"
       - "12000:12000/udp"
-      # --- PUBLIC BEACON API PORT ---
-      # Exposes the standard REST API for the beacon node.
-      # WARNING: Secure your host machine with a firewall.
-      - "3500:3500/tcp"  # Public Beacon API (gRPC Gateway)
-      # --- Optional Public Monitoring Port ---
-      # Exposes Prometheus metrics. Useful for public monitoring dashboards.
-      # WARNING: Secure this endpoint if you expose it.
-      - "8080:8080/tcp" # Prometheus Metrics
+      # Public Beacon API port (secure your host with a firewall).
+      - "3500:3500/tcp"
+      # Optional Public Monitoring Port.
+      - "8080:8080/tcp"
     volumes:
       - prysm-data:/data
       - ./jwt.hex:/etc/ethereum/jwt.hex
     command:
       - --mainnet
-      # --- Engine API Connection Settings (CRITICAL, NOT public) ---
+      # --- Engine API Connection Settings ---
       - --execution-endpoint=http://geth:8551
       - --jwt-secret=/etc/ethereum/jwt.hex
-      # --- Fee Recipient Settings (IMPORTANT for Stakers) ---
-      - --suggested-fee-recipient=0xYOUR_FEE_RECIPIENT_ADDRESS
+      # --- Fee Recipient Settings (CRITICAL) ---
+      # ** REPLACE THIS WITH YOUR OWN ETHEREUM ADDRESS **
+      - --suggested-fee-recipient=0x764a3D06E365e73085Bb489Da970E438F3C01c75
       # --- Checkpoint Sync (Speeds up initial sync dramatically) ---
       - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
       - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc
       # --- Other Recommended Settings ---
       - --datadir=/data
       - --rpc-host=0.0.0.0
-      - --grpc-gateway-host=0.0.0.0                # Binds gateway for public access
+      - --grpc-gateway-host=0.0.0.0
       - --grpc-gateway-port=3500
-      - --monitoring-host=0.0.0.0                  # Binds monitoring for public access
+      - --monitoring-host=0.0.0.0
       - --monitoring-port=8080
       - --accept-terms-of-use
