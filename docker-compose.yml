@@ -1,79 +1,101 @@
-# docker-compose.yml
-version: '3.8'
 
-services:
-  geth:
-    container_name: geth
-    image: ethereum/client-go:stable
-    volumes:
-      - geth-data:/data
-      - type: bind
-        source: ./jwt.hex
-        target: /geth/jwt.hex
-        read_only: true
-    tmpfs:
-      - /tmp
-    ports:
-      - "127.0.0.1:8545:8545"     # JSON-RPC local-only
-      - "8551:8551"
-      - "30303:30303"
-      - "30303:30303/udp"
-    ulimits:
-      nofile:
-        soft: 100000
-        hard: 100000
-    command:
-      - --datadir=/data
-      - --http
-      - --http.addr=0.0.0.0
-      - --http.port=8545
-      - --http.api=eth,net,web3,engine
-      - --authrpc.jwtsecret=/geth/jwt.hex
-      - --authrpc.port=8551
-      - --authrpc.addr=0.0.0.0
-      - --authrpc.vhosts=*
-      - --syncmode=snap
-      - --cache=4096
-      - --maxpeers=100
-      - --bootnodes=enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303,enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303,enode://2b252ab6a1d0f971d9722cb839a42cb81db019ba44c08754628ab4a823487071b5695317c8ccd085219c3a03af063495b2f1da8d18218da2d6a82981b45e6ffc@65.108.70.101:30303
-      - --metrics
-      - --metrics.addr=0.0.0.0
-    restart: unless-stopped
-
-  prysm:
-    container_name: prysm
-    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
-    volumes:
-      - prysm-data:/data
-      - type: bind
-        source: ./jwt.hex
-        target: /geth/jwt.hex
-        read_only: true
-    tmpfs:
-      - /tmp
-    ports:
-      - "3500:3500"
-      - "4000:4000"
-      - "13000:13000/udp"
-    ulimits:
-      nofile:
-        soft: 100000
-        hard: 100000
-    command:
-      - --datadir=/data
-      - --execution-endpoint=http://geth:8551
-      - --jwt-secret=/geth/jwt.hex
-      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
-      - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc
-      - --rpc-host=0.0.0.0
-      - --grpc-gateway-host=0.0.0.0
-      - --monitoring-host=0.0.0.0
-      - --max-peers=100
-      - --accept-terms-of-use
-    depends_on:
-      - geth
-    restart: unless-stopped
+# To use this file:
+# 1. Create a directory for your node (e.g., /home/user/eth-node).
+# 2. Inside that directory, run 'openssl rand -hex 32 > jwt.hex' to generate the JWT secret.
+# 3. Replace '0xYOUR_FEE_RECIPIENT_ADDRESS' with your actual Ethereum address.
+# 4. Find a current checkpoint sync URL from a trusted community source (e.g., ethstaker.cc).
+# 5. Run 'docker-compose up -d' from the same directory as this file.
+#
+version: "3.9"
 
 volumes:
   geth-data:
   prysm-data:
+
+services:
+  #
+  # Geth (Execution Layer Client)
+  #
+  geth:
+    container_name: geth
+    image: ethereum/client-go:stable
+    restart: unless-stopped
+    ports:
+      # P2P port for execution layer peering. MUST be exposed.
+      - "30303:30303/tcp"
+      - "30303:30303/udp"
+      # --- PUBLIC RPC PORTS ---
+      # Exposing these makes your node a public RPC endpoint.
+      # WARNING: Secure your host machine with a firewall.
+      - "8545:8545/tcp"  # Public HTTP JSON-RPC
+      - "8546:8546/tcp"  # Public WebSocket JSON-RPC
+    volumes:
+      - geth-data:/data
+      - ./jwt.hex:/etc/ethereum/jwt.hex
+    command:
+      - --mainnet
+      # --- Engine API Settings (CRITICAL for CL communication, NOT public) ---
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts="*"
+      - --authrpc.jwtsecret=/etc/ethereum/jwt.hex
+      # --- Public HTTP RPC Settings ---
+      - --http
+      - --http.addr=0.0.0.0          # Listen on all interfaces for public access
+      - --http.port=8545
+      - --http.vhosts="*"            # Allow all hostnames for public access
+      - --http.api=eth,net,web3      # SAFE, READ-ONLY APIs. DO NOT add 'personal', 'admin', 'txpool'.
+      # --- Public WebSocket RPC Settings ---
+      - --ws
+      - --ws.addr=0.0.0.0            # Listen on all interfaces for public access
+      - --ws.port=8546
+      - --ws.origins="*"             # Allow all origins for public access
+      - --ws.api=eth,net,web3        # SAFE, READ-ONLY APIs.
+      # --- Other Recommended Settings ---
+      - --datadir=/data
+      - --cache=4096
+      - --metrics
+      - --metrics.addr=0.0.0.0
+
+  #
+  # Prysm (Consensus Layer Client - Beacon Node)
+  #
+  prysm:
+    container_name: prysm
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+    restart: unless-stopped
+    depends_on:
+      - geth
+    ports:
+      # P2P ports for consensus layer peering. MUST be exposed.
+      - "13000:13000/tcp"
+      - "12000:12000/udp"
+      # --- PUBLIC BEACON API PORT ---
+      # Exposes the standard REST API for the beacon node.
+      # WARNING: Secure your host machine with a firewall.
+      - "3500:3500/tcp"  # Public Beacon API (gRPC Gateway)
+      # --- Optional Public Monitoring Port ---
+      # Exposes Prometheus metrics. Useful for public monitoring dashboards.
+      # WARNING: Secure this endpoint if you expose it.
+      - "8080:8080/tcp" # Prometheus Metrics
+    volumes:
+      - prysm-data:/data
+      - ./jwt.hex:/etc/ethereum/jwt.hex
+    command:
+      - --mainnet
+      # --- Engine API Connection Settings (CRITICAL, NOT public) ---
+      - --execution-endpoint=http://geth:8551
+      - --jwt-secret=/etc/ethereum/jwt.hex
+      # --- Fee Recipient Settings (IMPORTANT for Stakers) ---
+      - --suggested-fee-recipient=0xYOUR_FEE_RECIPIENT_ADDRESS
+      # --- Checkpoint Sync (Speeds up initial sync dramatically) ---
+      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
+      - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc
+      # --- Other Recommended Settings ---
+      - --datadir=/data
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0                # Binds gateway for public access
+      - --grpc-gateway-port=3500
+      - --monitoring-host=0.0.0.0                  # Binds monitoring for public access
+      - --monitoring-port=8080
+      - --accept-terms-of-use
