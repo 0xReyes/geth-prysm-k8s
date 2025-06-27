@@ -1,102 +1,115 @@
-#
-# A corrected and secure docker-compose.yml for a PUBLIC Geth/Prysm Ethereum Mainnet Node
-#
-# !!! --- SECURITY WARNING --- !!!
-# This configuration exposes your node's APIs to the public internet.
-# YOU ARE RESPONSIBLE for securing the host machine with a firewall.
-#
-# To use this file:
-# 1. Ensure you have a 'jwt.hex' file in this directory.
-# 2. **CRITICAL: Replace '0xYOUR_FEE_RECIPIENT_ADDRESS' with your actual Ethereum address.**
-# 3. Stop your existing containers: `docker-compose down`
-# 4. Use this new file and restart: `docker-compose up -d`
-#
 version: "3.9"
 
 volumes:
-  geth-data:
-  prysm-data:
+  geth-data:  # Persistent storage for Geth's blockchain data
+  prysm-data: # Persistent storage for Prysm's beacon chain data
 
 services:
-  #
+  #-----------------------------------------------------------------------------
   # Geth (Execution Layer Client)
-  #
+  #-----------------------------------------------------------------------------
   geth:
     container_name: geth
-    image: ethereum/client-go:stable
-    restart: unless-stopped
+    image: ethereum/client-go:stable  # Official Ethereum execution client
+    restart: unless-stopped           # Auto-restart unless manually stopped
     ports:
-      # P2P port for execution layer peering.
-      - "30303:30303/tcp"
-      - "30303:30303/udp"
-      # Public RPC ports (secure your host with a firewall).
-      - "8545:8545/tcp"  # Public HTTP JSON-RPC
-      - "8546:8546/tcp"  # Public WebSocket JSON-RPC
-    volumes:
-      - geth-data:/data
-      - ./jwt.hex:/etc/ethereum/jwt.hex
-    command:
-      - --mainnet
-      # --- Engine API Settings (CRITICAL for CL communication, NOT public) ---
-      - --authrpc.addr=0.0.0.0
-      - --authrpc.port=8551
-      # --- FIX: Explicitly allow the 'geth' and 'localhost' hostnames ---
-      - --authrpc.vhosts=geth,localhost
-      - --authrpc.jwtsecret=/etc/ethereum/jwt.hex
-      # --- Public HTTP RPC Settings ---
-      - --http
-      - --http.addr=0.0.0.0
-      - --http.port=8545
-      - --http.vhosts="*"
-      - --http.api=eth,net,web3
-      # --- Public WebSocket RPC Settings ---
-      - --ws
-      - --ws.addr=0.0.0.0
-      - --ws.port=8546
-      - --ws.origins="*"
-      - --ws.api=eth,net,web3
-      # --- Other Recommended Settings ---
-      - --datadir=/data
-      - --cache=4096
-      - --metrics
-      - --metrics.addr=0.0.0.0
+      # P2P Networking (Essential for peer discovery)
+      - "30303:30303/tcp"  # TCP port for Ethereum mainnet peers
+      - "30303:30303/udp"  # UDP port for faster peer discovery
 
-  #
-  # Prysm (Consensus Layer Client - Beacon Node)
-  #
+      # Public RPC Ports (DANGER: Only enable with firewall/NGINX)
+      # - "8545:8545/tcp"  # HTTP JSON-RPC (Disabled by default for security)
+      # - "8546:8546/tcp"  # WebSocket JSON-RPC (Disabled by default)
+
+    volumes:
+      - geth-data:/data               # Maps volume to persist blockchain data
+      - ./jwt.hex:/etc/ethereum/jwt.hex  # JWT secret for CL-EL communication
+
+    command:
+      #--- Core Network Settings ---
+      - --mainnet                     # Connect to Ethereum mainnet
+
+      #--- Engine API (Secure Communication with Consensus Layer) ---
+      - --authrpc.addr=0.0.0.0        # Listen on all interfaces (required for Prysm)
+      - --authrpc.port=8551           # Authentication port for CL connection
+      - --authrpc.vhosts=geth,localhost  # Only allow these hostnames (security)
+      - --authrpc.jwtsecret=/etc/ethereum/jwt.hex  # Path to shared secret
+
+      #--- HTTP RPC Settings (DANGER: Exposed to internet if ports are open) ---
+      - --http                        # Enable HTTP-RPC server
+      - --http.addr=0.0.0.0           # Listen on all interfaces
+      - --http.port=8545              # Standard HTTP-RPC port
+      - --http.vhosts="*"             # ⚠️ Allows all hosts (recommend restricting)
+      - --http.api=eth,net,web3       # Enabled APIs (minimal for security)
+
+      #--- WebSocket RPC Settings (Same warnings as HTTP) ---
+      - --ws                          # Enable WebSocket-RPC
+      - --ws.addr=0.0.0.0             # Listen on all interfaces
+      - --ws.port=8546                # Standard WS-RPC port
+      - --ws.origins="*"              # ⚠️ Allows all origins (recommend restricting)
+      - --ws.api=eth,net,web3         # Enabled APIs
+
+      #--- Performance & Data Management ---
+      - --datadir=/data               # Data storage location
+      - --db.engine=pebble            # More modern & reliable database engine
+      - --cache=8192                  # 8GB RAM allocation (adjust for your system)
+      - --gcmode=archive              # Keeps full history (required for some tools)
+
+      #--- Monitoring ---
+      - --metrics                     # Enable metrics collection
+      - --metrics.addr=0.0.0.0        # Make metrics available
+
+      #--- Sync Optimization ---
+      - --syncmode=snap               # Fastest sync mode (uses snapshots)
+      - --txlookuplimit=0             # Keep full transaction index
+
+  #-----------------------------------------------------------------------------
+  # Prysm (Consensus Layer Client)
+  #-----------------------------------------------------------------------------
   prysm:
     container_name: prysm
     image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
     restart: unless-stopped
     depends_on:
-      - geth
+      - geth  # Wait for Geth to start first
+
     ports:
-      # P2P ports for consensus layer peering.
-      - "13000:13000/tcp"
-      - "12000:12000/udp"
-      # Public Beacon API port (secure your host with a firewall).
-      - "3500:3500/tcp"
-      # Optional Public Monitoring Port.
-      - "8080:8080/tcp"
+      # P2P Networking
+      - "13000:13000/tcp"  # Libp2p TCP port
+      - "12000:12000/udp"  # Discovery UDP port
+
+      # API Ports
+      - "3500:3500/tcp"    # Beacon API port (for validators/explorers)
+      - "8080:8080/tcp"    # Metrics port
+
     volumes:
-      - prysm-data:/data
-      - ./jwt.hex:/etc/ethereum/jwt.hex
+      - prysm-data:/data              # Beacon chain data persistence
+      - ./jwt.hex:/etc/ethereum/jwt.hex  # Shared JWT secret
+
     command:
-      - --mainnet
-      # --- Engine API Connection Settings ---
-      - --execution-endpoint=http://geth:8551
-      - --jwt-secret=/etc/ethereum/jwt.hex
-      # --- Fee Recipient Settings (CRITICAL) ---
-      # ** REPLACE THIS WITH YOUR OWN ETHEREUM ADDRESS **
+      #--- Core Settings ---
+      - --mainnet                     # Ethereum mainnet
+      - --accept-terms-of-use         # Required for Prysm
+
+      #--- Execution Layer Connection ---
+      - --execution-endpoint=http://geth:8551  # Connect to Geth's Engine API
+      - --jwt-secret=/etc/ethereum/jwt.hex     # Path to JWT secret
+
+      #--- Validator Settings ---
       - --suggested-fee-recipient=0x764a3D06E365e73085Bb489Da970E438F3C01c75
-      # --- Checkpoint Sync (Speeds up initial sync dramatically) ---
-      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc
-      - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc
-      # --- Other Recommended Settings ---
-      - --datadir=/data
-      - --rpc-host=0.0.0.0
-      - --grpc-gateway-host=0.0.0.0
-      - --grpc-gateway-port=3500
-      - --monitoring-host=0.0.0.0
-      - --monitoring-port=8080
-      - --accept-terms-of-use
+
+      #--- Checkpoint Sync (Faster Initial Sync) ---
+      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc  # Trusted checkpoint source
+      - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc  # Genesis data
+
+      #--- API Settings ---
+      - --rpc-host=0.0.0.0           # Beacon RPC host
+      - --grpc-gateway-host=0.0.0.0  # REST API host
+      - --grpc-gateway-port=3500      # REST API port
+      - --monitoring-host=0.0.0.0     # Metrics host
+      - --monitoring-port=8080        # Metrics port
+
+      #--- Recommended Optimizations ---
+      - --datadir=/data               # Data storage location
+      - --slasher                     # Enable slasher protection
+      - --enable-historical-state     # Keep historical states
