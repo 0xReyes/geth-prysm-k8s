@@ -1,115 +1,81 @@
 version: "3.9"
 
 volumes:
-  geth-data:  # Persistent storage for Geth's blockchain data
-  prysm-data: # Persistent storage for Prysm's beacon chain data
+  geth-data:
+  prysm-data:
 
 services:
-  #-----------------------------------------------------------------------------
-  # Geth (Execution Layer Client)
-  #-----------------------------------------------------------------------------
   geth:
     container_name: geth
-    image: ethereum/client-go:stable  # Official Ethereum execution client
-    restart: unless-stopped           # Auto-restart unless manually stopped
+    image: ethereum/client-go:v1.15.11
+    restart: unless-stopped
     ports:
-      # P2P Networking (Essential for peer discovery)
-      - "30303:30303/tcp"  # TCP port for Ethereum mainnet peers
-      - "30303:30303/udp"  # UDP port for faster peer discovery
-
-      # Public RPC Ports (DANGER: Only enable with firewall/NGINX)
-      # - "8545:8545/tcp"  # HTTP JSON-RPC (Disabled by default for security)
-      # - "8546:8546/tcp"  # WebSocket JSON-RPC (Disabled by default)
-
+      - "30303:30303/tcp"
+      - "30303:30303/udp"
     volumes:
-      - geth-data:/data               # Maps volume to persist blockchain data
-      - ./jwt.hex:/etc/ethereum/jwt.hex  # JWT secret for CL-EL communication
-
+      - geth-data:/data
+      - ./jwt.hex:/etc/ethereum/jwt.hex
     command:
-      #--- Core Network Settings ---
-      - --mainnet                     # Connect to Ethereum mainnet
+      - --mainnet
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=localhost,geth,prysm
+      - --authrpc.jwtsecret=/etc/ethereum/jwt.hex
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.vhosts=localhost,127.0.0.1
+      - --http.api=eth,net,web3
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.origins=localhost,127.0.0.1
+      - --ws.api=eth,net,web3
+      - --datadir=/data
+      - --db.engine=pebble
+      - --cache=8192
+      - --gcmode=archive
+      - --syncmode=snap
+      - --txlookuplimit=0
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --snapshot.verification=all
+      - --override.terminaltotaldifficulty=58750000000000000000000
 
-      #--- Engine API (Secure Communication with Consensus Layer) ---
-      - --authrpc.addr=0.0.0.0        # Listen on all interfaces (required for Prysm)
-      - --authrpc.port=8551           # Authentication port for CL connection
-      - --authrpc.vhosts=geth,localhost  # Only allow these hostnames (security)
-      - --authrpc.jwtsecret=/etc/ethereum/jwt.hex  # Path to shared secret
-
-      #--- HTTP RPC Settings (DANGER: Exposed to internet if ports are open) ---
-      - --http                        # Enable HTTP-RPC server
-      - --http.addr=0.0.0.0           # Listen on all interfaces
-      - --http.port=8545              # Standard HTTP-RPC port
-      - --http.vhosts="*"             # ⚠️ Allows all hosts (recommend restricting)
-      - --http.api=eth,net,web3       # Enabled APIs (minimal for security)
-
-      #--- WebSocket RPC Settings (Same warnings as HTTP) ---
-      - --ws                          # Enable WebSocket-RPC
-      - --ws.addr=0.0.0.0             # Listen on all interfaces
-      - --ws.port=8546                # Standard WS-RPC port
-      - --ws.origins="*"              # ⚠️ Allows all origins (recommend restricting)
-      - --ws.api=eth,net,web3         # Enabled APIs
-
-      #--- Performance & Data Management ---
-      - --datadir=/data               # Data storage location
-      - --db.engine=pebble            # More modern & reliable database engine
-      - --cache=8192                  # 8GB RAM allocation (adjust for your system)
-      - --gcmode=archive              # Keeps full history (required for some tools)
-
-      #--- Monitoring ---
-      - --metrics                     # Enable metrics collection
-      - --metrics.addr=0.0.0.0        # Make metrics available
-
-      #--- Sync Optimization ---
-      - --syncmode=snap               # Fastest sync mode (uses snapshots)
-      - --txlookuplimit=0             # Keep full transaction index
-
-  #-----------------------------------------------------------------------------
-  # Prysm (Consensus Layer Client)
-  #-----------------------------------------------------------------------------
   prysm:
     container_name: prysm
-    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:v5.0.4
     restart: unless-stopped
     depends_on:
-      - geth  # Wait for Geth to start first
-
+      geth:
+        condition: service_started
     ports:
-      # P2P Networking
-      - "13000:13000/tcp"  # Libp2p TCP port
-      - "12000:12000/udp"  # Discovery UDP port
-
-      # API Ports
-      - "3500:3500/tcp"    # Beacon API port (for validators/explorers)
-      - "8080:8080/tcp"    # Metrics port
-
+      - "13000:13000/tcp"
+      - "12000:12000/udp"
+      - "3500:3500/tcp"
+      - "8080:8080/tcp"
     volumes:
-      - prysm-data:/data              # Beacon chain data persistence
-      - ./jwt.hex:/etc/ethereum/jwt.hex  # Shared JWT secret
-
+      - prysm-data:/data
+      - ./jwt.hex:/etc/ethereum/jwt.hex
     command:
-      #--- Core Settings ---
-      - --mainnet                     # Ethereum mainnet
-      - --accept-terms-of-use         # Required for Prysm
-
-      #--- Execution Layer Connection ---
-      - --execution-endpoint=http://geth:8551  # Connect to Geth's Engine API
-      - --jwt-secret=/etc/ethereum/jwt.hex     # Path to JWT secret
-
-      #--- Validator Settings ---
+      - --mainnet
+      - --accept-terms-of-use
+      - --execution-endpoint=http://geth:8551
+      - --jwt-secret=/etc/ethereum/jwt.hex
       - --suggested-fee-recipient=0x764a3D06E365e73085Bb489Da970E438F3C01c75
-
-      #--- Checkpoint Sync (Faster Initial Sync) ---
-      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc  # Trusted checkpoint source
-      - --genesis-beacon-api-url=https://beaconstate.ethstaker.cc  # Genesis data
-
-      #--- API Settings ---
-      - --rpc-host=0.0.0.0           # Beacon RPC host
-      - --grpc-gateway-host=0.0.0.0  # REST API host
-      - --grpc-gateway-port=3500      # REST API port
-      - --monitoring-host=0.0.0.0     # Metrics host
-      - --monitoring-port=8080        # Metrics port
-
-      #--- Recommended Optimizations ---
-      - --datadir=/data               # Data storage location
-      - --slasher                     # Enable slasher protection
-      - --enable-historical-state     # Keep historical states
+      - --checkpoint-sync-url=https://beaconstate.ethstaker.cc,https://sync-mainnet.beaconcha.in,https://mainnet-checkpoint-sync.stakely.io
+      - --weak-subjectivity-checkpoint=14700000:0x3d6d6d6a9b4e9c8d0d3e6e2e3e8d3a0e6b2e3d6c6e8e3d6e2e3d6e8e3d6e2e3d6
+      - --datadir=/data
+      - --grpc-gateway-host=0.0.0.0
+      - --grpc-gateway-port=3500
+      - --monitoring-host=0.0.0.0
+      - --monitoring-port=8080
+      - --p2p-host-ip=0.0.0.0
+      - --p2p-tcp-port=13000
+      - --p2p-udp-port=12000
+      - --bolt-mmap-initial-size=1073741824
+      - --slashing-protection-history-export-dir=/data/slashing-protection
+      - --enable-validator-monitoring
+      - --enable-historical-state
+      - --execution-timeout=120s
+      - --jwt-id=Geth-Prysm
